@@ -1,0 +1,14 @@
+# System
+.vscode/
+.DS_Store
+
+# Rust
+.cargo/
+target/
+
+# Holochain
+.wasm_cache/
+.wasm_target/
+config.yml
+databases/
+

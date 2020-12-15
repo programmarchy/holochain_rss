@@ -1,0 +1,25 @@
+[package]
+name = "holochain-rss"
+version = "0.0.1"
+authors = ["Donald Ness <donald@programmarchy.com>"]
+edition = "2018"
+
+[dependencies]
+serde = "1.0.104"
+tokio = { version = "0.2.11", features = [ "full" ] }
+futures = "0.3.8"
+human-panic = "1.0.3"
+structopt = "0.3.11"
+tracing = "0.1.21"
+tracing-subscriber = "0.2.15"
+holochain_keystore = { path = "../holochain/crates/keystore" }
+holochain_p2p = { path = "../holochain/crates/holochain_p2p" }
+holochain_state = { path = "../holochain/crates/state" }
+holochain_types = { path = "../holochain/crates/types" }
+holochain_zome_types = { path = "../holochain/crates/zome_types" }
+holochain = { path = "../holochain/crates/holochain" }
+hdk3 = { path = "../holochain/crates/hdk" }
+
+[patch.crates-io]
+rkv = { git = "https://github.com/holochain/rkv.git", branch = "master" }
+lmdb-rkv = { git = "https://github.com/holochain/lmdb-rs.git" }
