@@ -46,8 +46,8 @@ use holochain_zome_types::{
 use structopt::StructOpt;
 
 const RSS_APP_ID: &'static str = "holochain_rss-0.0.1";
-const RSS_PUB_DNA_BYTES: &'static [u8] = include_bytes!("../dna/rss_pub.dna.gz");
-const RSS_PUB_ZOME_NAME: &'static str = "rss_pub";
+const RSS_DNA_BYTES: &'static [u8] = include_bytes!("../app/rss.dna.gz");
+const RSS_ZOME_NAME: &'static str = "rss";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SerializedBytes)]
 pub struct RssChannel {
@@ -165,8 +165,8 @@ async fn install_and_activate_rss_app(
   agent_key: AgentPubKey
 ) -> ConductorResult<InstalledApp> {
   let installed_app_id = InstalledAppId::from(RSS_APP_ID);
-  let cell_nick = CellNick::from("holochain_rss_pub");
-  let dna_bytes = RSS_PUB_DNA_BYTES.into();
+  let cell_nick = CellNick::from("holochain_rss");
+  let dna_bytes = RSS_DNA_BYTES.into();
   let dna = DnaFile::from_file_content(dna_bytes).await?;
   let installed_app = install_app(&conductor, agent_key, installed_app_id.clone(), dna, cell_nick)
     .await?;
@@ -247,7 +247,7 @@ async fn create_rss_channel(
 
   let zome_call = ZomeCall {
     cell_id: cell_id,
-    zome_name: String::from(RSS_PUB_ZOME_NAME).into(),
+    zome_name: String::from(RSS_ZOME_NAME).into(),
     fn_name: FunctionName::from("create_rss_channel"),
     payload: ExternInput::new(data?),
     cap: None,
@@ -279,7 +279,7 @@ async fn fetch_rss_channels(
 ) -> CallZomeResult<FetchRssChannelsResponse> {
   let zome_call = ZomeCall {
     cell_id: cell_id,
-    zome_name: String::from(RSS_PUB_ZOME_NAME).into(),
+    zome_name: String::from(RSS_ZOME_NAME).into(),
     fn_name: FunctionName::from("fetch_rss_channels"),
     payload: ExternInput::new(SerializedBytes::default()),
     cap: None,

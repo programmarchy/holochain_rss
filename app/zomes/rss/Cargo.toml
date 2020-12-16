@@ -1,18 +1,18 @@
 [package]
-name = "holochain_rss_pub"
+name = "holochain_rss"
 version = "0.0.1"
 authors = ["Donald Ness <donald@programmarchy.com>"]
 edition = "2018"
 
 [lib]
-name = "holochain_rss_pub"
+name = "holochain_rss"
 path = "src/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
 serde = "1.0.104"
 derive_more = "0.99.9"
-hdk3 = { path = "../../../holochain/crates/hdk" }
+hdk3 = { path = "../../../../holochain/crates/hdk" }
 
 [profile.release]
 opt-level = "z"

@@ -1,0 +1,10 @@
+{
+  "name": "holochain_rss",
+  "uuid": "35bba451-84a4-42c8-bc21-8fcabeedf827",
+  "properties": null,
+  "zomes": {
+    "rss": {
+      "wasm_path": "../zomes/rss/target/wasm32-unknown-unknown/release/holochain_rss.wasm"
+    }
+  }
+}
