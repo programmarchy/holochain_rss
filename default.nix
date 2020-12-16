@@ -1,1 +1,0 @@
-import ../holochain/default.nix

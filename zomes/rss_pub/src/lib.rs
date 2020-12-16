@@ -34,7 +34,7 @@ pub struct RssChannel {
 }
 
 #[hdk_entry(id = "rss_item")]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct RssItem {
   pub title: Option<String>,
   pub link: Option<String>,
@@ -51,7 +51,31 @@ pub fn create_rss_channel(channel: RssChannel) -> ExternResult<()> {
   Ok(())
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, SerializedBytes)]
+pub struct FetchRssChannelsResponse(Vec<RssChannel>);
+
 #[hdk_extern]
-pub fn fetch_rss_channels(_: ()) -> ExternResult<()> {
-  Ok(())
+pub fn fetch_rss_channels(_: ()) -> ExternResult<FetchRssChannelsResponse> {
+  let path_hash = Path::from(RSS_CHANNELS_PATH).hash()?;
+
+  let links = get_links(path_hash, None)?;
+
+  let channels: Vec<RssChannel> = get_app_entries(links);
+
+  Ok(FetchRssChannelsResponse(channels))
+}
+
+pub fn get_app_entries<A: TryFrom<SerializedBytes, Error = SerializedBytesError>>(
+  links: Links
+) -> Vec<A> {
+  links
+    .into_inner()
+    .into_iter()
+    .map(|link: link::Link| get(link.target, GetOptions::default()))
+    .filter_map(HdkResult::ok)
+    .filter_map(|element| element)
+    .map(|element| element.entry().to_app_option::<A>())
+    .filter_map(Result::ok)
+    .filter_map(|channel| channel)
+    .collect::<Vec<A>>()
 }

@@ -1206,26 +1206,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "holochain-rss"
-version = "0.0.1"
-dependencies = [
- "futures",
- "hdk3",
- "holochain",
- "holochain_keystore",
- "holochain_p2p",
- "holochain_state",
- "holochain_types",
- "holochain_zome_types",
- "human-panic",
- "serde",
- "structopt",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "holochain_keystore"
 version = "0.0.1"
 dependencies = [
@@ -1264,6 +1244,27 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio_safe_block_on",
+]
+
+[[package]]
+name = "holochain_rss"
+version = "0.0.1"
+dependencies = [
+ "futures",
+ "hdk3",
+ "holochain",
+ "holochain_keystore",
+ "holochain_p2p",
+ "holochain_state",
+ "holochain_types",
+ "holochain_zome_types",
+ "human-panic",
+ "serde",
+ "structopt",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

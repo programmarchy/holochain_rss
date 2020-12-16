@@ -1,5 +1,5 @@
 [package]
-name = "holochain-rss"
+name = "holochain_rss"
 version = "0.0.1"
 authors = ["Donald Ness <donald@programmarchy.com>"]
 edition = "2018"
@@ -12,6 +12,7 @@ human-panic = "1.0.3"
 structopt = "0.3.11"
 tracing = "0.1.21"
 tracing-subscriber = "0.2.15"
+thiserror = "1.0.22"
 holochain_keystore = { path = "../holochain/crates/keystore" }
 holochain_p2p = { path = "../holochain/crates/holochain_p2p" }
 holochain_state = { path = "../holochain/crates/state" }

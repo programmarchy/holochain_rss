@@ -1,36 +1,63 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
+mod error;
+
+use crate::{
+  error::{CallZomeError, CallZomeResult}
+};
 use std::{
+  convert::TryFrom,
   error::Error,
   path::PathBuf,
   string::String,
 };
-use hdk3::prelude::{AgentPubKey, Serialize, Deserialize};
+use hdk3::prelude::{AgentPubKey, Deserialize, Serialize, SerializedBytes, SerializedBytesError, holochain_serial};
 use holochain::{
   conductor::{
     Conductor,
     ConductorHandle,
-    api::error::ConductorApiResult,
+    api::ZomeCall,
+    api::error::{ConductorApiError, ConductorApiResult},
     config::ConductorConfig,
-    error::ConductorResult,
+    error::{ConductorError, ConductorResult, CreateAppError},
     paths::{ConfigFilePath, EnvironmentRootPath},
   },
-  core::DnaHash
+  core::{
+    DnaHash,
+    ribosome::ZomeCallInvocation,
+    workflow::ZomeCallResult,
+  }
 };
 use holochain_keystore::KeystoreSenderExt;
 use holochain_state::{
-  test_utils::{TestEnvironments}
+  test_utils::TestEnvironments
 };
 use holochain_types::{
   app::{CellNick, InstalledCell, InstalledAppId, InstalledApp},
   cell::CellId,
-  dna::DnaFile,
+  dna::{DnaFile, zome::Zome},
+};
+use holochain_zome_types::{
+  zome::{FunctionName, ZomeName},
+  zome_io::{ExternInput, ExternOutput},
+  ZomeCallResponse,
 };
 use structopt::StructOpt;
 
+const RSS_APP_ID: &'static str = "holochain_rss-0.0.1";
 const RSS_PUB_DNA_BYTES: &'static [u8] = include_bytes!("../dna/rss_pub.dna.gz");
-const RSS_PUB_CELL_HANDLE: &'static str = "rss_pub";
+const RSS_PUB_ZOME_NAME: &'static str = "rss_pub";
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SerializedBytes)]
+pub struct RssChannel {
+  pub title: String,
+  pub link: String,
+  pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SerializedBytes)]
+pub struct FetchRssChannelsResponse(Vec<RssChannel>);
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "holochain_rss", about = "A Holochain RSS conductor.")]
@@ -46,7 +73,7 @@ struct Opt {
 
 fn main() {
   tracing_subscriber::fmt()
-    .with_max_level(tracing::Level::DEBUG)
+    .with_max_level(tracing::Level::INFO)
     .init();
 
   holochain::conductor::tokio_runtime()
@@ -66,16 +93,20 @@ async fn async_main() {
   let agent_key = generate_agent_key(&conductor)
     .await;
 
-  let dna_bytes = RSS_PUB_DNA_BYTES.into();
-  let cell_handle = RSS_PUB_CELL_HANDLE.into();
-  let dna = DnaFile::from_file_content(dna_bytes)
+  let installed_app = install_and_activate_rss_app(&conductor, agent_key.clone())
     .await
-    .expect("Failed to load DNA from file.");
-  let installed_app = install_app(&conductor, agent_key, dna, cell_handle)
-    .await
-    .expect("Failed to install app.");
+    .expect("Failed to install app.")
+    .clone();
 
-  tracing::debug!("Installed app: {:#?}", installed_app);
+  tracing::info!("Installed app: {:#?}", installed_app.clone());
+
+  let installed_cell = &installed_app.cell_data[0];
+  let installed_cell_id = installed_cell.clone().into_id();
+  let FetchRssChannelsResponse(rss_channels) = fetch_rss_channels(&conductor, installed_cell_id.clone(), agent_key.clone())
+    .await
+    .expect("Failed to fetch RSS channels.");
+
+  tracing::info!("RSS channels: {:?}", rss_channels);
 
   conductor
     .take_shutdown_handle()
@@ -129,34 +160,36 @@ async fn generate_agent_key(
     .expect("Failed to generate agent key.")
 }
 
-async fn rss_pub_app(
+async fn install_and_activate_rss_app(
   conductor: &ConductorHandle,
   agent_key: AgentPubKey
 ) -> ConductorResult<InstalledApp> {
+  let installed_app_id = InstalledAppId::from(RSS_APP_ID);
+  let cell_nick = CellNick::from("holochain_rss_pub");
   let dna_bytes = RSS_PUB_DNA_BYTES.into();
-  let cell_handle = RSS_PUB_CELL_HANDLE.into();
   let dna = DnaFile::from_file_content(dna_bytes).await?;
-  find_or_install_app(&conductor, agent_key, dna, cell_handle)
-    .await
-}
+  let installed_app = install_app(&conductor, agent_key, installed_app_id.clone(), dna, cell_nick)
+    .await?;
 
-fn get_installed_app_id(cell_handle: &CellNick, dna_hash: &DnaHash) -> InstalledAppId {
-  format!("{}-{}", String::from(cell_handle), dna_hash)
+  activate_app(&conductor, installed_app_id)
+    .await?;
+
+  Ok(installed_app)
 }
 
 async fn install_app(
   conductor: &ConductorHandle,
   agent_key: AgentPubKey,
+  installed_app_id: InstalledAppId,
   dna: DnaFile,
-  cell_handle: CellNick
+  cell_nick: CellNick,
 ) -> ConductorResult<InstalledApp> {
   let dna_hash = dna.dna_hash();
   let cell_id = CellId::from((dna_hash.clone(), agent_key.clone()));
   conductor.clone().install_dna(dna.clone())
     .await?;
 
-  let installed_app_id = get_installed_app_id(&cell_handle, &dna_hash);
-  let installed_cell = InstalledCell::new(cell_id.clone(), cell_handle.clone());
+  let installed_cell = InstalledCell::new(cell_id.clone(), cell_nick.clone());
   let membrane_proofs = vec![(installed_cell.clone(), None)];
   conductor.clone().install_app(installed_app_id.clone(), membrane_proofs)
     .await?;
@@ -169,27 +202,109 @@ async fn install_app(
   Ok(installed_app)
 }
 
+async fn activate_app(
+  conductor: &ConductorHandle,
+  installed_app_id: InstalledAppId
+) -> ConductorResult<()> {
+  conductor.clone().activate_app(installed_app_id.clone())
+    .await?;
+  
+  let errors = conductor
+    .clone()
+    .setup_cells()
+    .await?;
+  
+  errors
+    .into_iter()
+    .find(|error| match error {
+      CreateAppError::Failed {
+        installed_app_id: error_app_id,
+        ..
+      } => error_app_id == &installed_app_id,
+    })
+    .map(|error| Err(ConductorError::CreateAppFailed(error)))
+    .unwrap_or(Ok(()))
+}
+
 async fn find_app(
   conductor: &ConductorHandle,
-  dna: DnaFile,
-  cell_handle: CellNick
+  installed_app_id: InstalledAppId,
 ) -> ConductorResult<Option<InstalledApp>> {
-  let dna_hash = dna.dna_hash();
-  let installed_app_id = get_installed_app_id(&cell_handle, &dna_hash);
-
   conductor.clone().get_app_info(&installed_app_id)
     .await
 }
 
-async fn find_or_install_app(
+async fn create_rss_channel(
   conductor: &ConductorHandle,
+  cell_id: CellId,
   agent_key: AgentPubKey,
-  dna: DnaFile,
-  cell_handle: CellNick
-) -> ConductorResult<InstalledApp> {
-  match find_app(&conductor, dna.clone(), cell_handle.clone()).await? {
-    Some(installed_app) => Ok(installed_app),
-    None => install_app(&conductor, agent_key, dna, cell_handle).await
+  channel: RssChannel,
+) -> CallZomeResult<()> {
+  let data = match SerializedBytes::try_from(channel) {
+    Ok(data) => Ok(data),
+    Err(_) => Err(CallZomeError::SerializedBytes)
+  };
+
+  let zome_call = ZomeCall {
+    cell_id: cell_id,
+    zome_name: String::from(RSS_PUB_ZOME_NAME).into(),
+    fn_name: FunctionName::from("create_rss_channel"),
+    payload: ExternInput::new(data?),
+    cap: None,
+    provenance: agent_key,
+  };
+
+  let call_result = conductor
+    .clone()
+    .call_zome(zome_call)
+    .await?;
+  
+  match call_result? {
+    ZomeCallResponse::Ok(_) => {
+      Ok(())
+    },
+    ZomeCallResponse::Unauthorized(c, z, f, a) => {
+      Err(CallZomeError::UnauthorizedZomeCall(c, z, f, a))
+    },
+    ZomeCallResponse::NetworkError(s) => {
+      Err(CallZomeError::ZomeCallNetworkError(s))
+    }
+  }
+}
+
+async fn fetch_rss_channels(
+  conductor: &ConductorHandle,
+  cell_id: CellId,
+  agent_key: AgentPubKey,
+) -> CallZomeResult<FetchRssChannelsResponse> {
+  let zome_call = ZomeCall {
+    cell_id: cell_id,
+    zome_name: String::from(RSS_PUB_ZOME_NAME).into(),
+    fn_name: FunctionName::from("fetch_rss_channels"),
+    payload: ExternInput::new(SerializedBytes::default()),
+    cap: None,
+    provenance: agent_key,
+  };
+
+  let call_result = conductor
+    .clone()
+    .call_zome(zome_call)
+    .await?;
+
+  match call_result? {
+    ZomeCallResponse::Ok(output) => {
+      let serialized_bytes = output.into_inner();
+      match FetchRssChannelsResponse::try_from(serialized_bytes) {
+        Ok(response) => Ok(response),
+        Err(_) => Err(CallZomeError::SerializedBytes)
+      }
+    },
+    ZomeCallResponse::Unauthorized(c, z, f, a) => {
+      Err(CallZomeError::UnauthorizedZomeCall(c, z, f, a))
+    },
+    ZomeCallResponse::NetworkError(s) => {
+      Err(CallZomeError::ZomeCallNetworkError(s))
+    }
   }
 }
 
@@ -198,7 +313,7 @@ mod tests {
   use super::*;
 
   #[tokio::test(threaded_scheduler)]
-  async fn can_install_app() {
+  async fn can_install_app_and_fetch_channels() {
     tracing_subscriber::fmt()
       .with_max_level(tracing::Level::INFO)
       .init();
@@ -209,11 +324,30 @@ mod tests {
     let agent_key = generate_agent_key(&conductor)
       .await;
   
-    let installed_app = rss_pub_app(&conductor, agent_key)
+    let installed_app = install_and_activate_rss_app(&conductor, agent_key.clone())
       .await
-      .expect("can install app");
+      .unwrap();
 
-    assert_eq!(String::from(installed_app.cell_data[0].as_nick()), String::from(RSS_PUB_CELL_HANDLE));
+    tracing::info!("installed_app: {:?}", installed_app.clone());
+  
+    let cell = &installed_app.cell_data[0];
+    let cell_id = cell.clone().into_id();
+
+    let rss_channel = RssChannel {
+      title: "My RSS Channel".to_string(),
+      link: "https://holopod.host/my-rss-channel.xml".to_string(),
+      description: "Welcome to the Holochain distributed RSS channel!".to_string(),
+    };
+
+    let _ = create_rss_channel(&conductor, cell_id.clone(), agent_key.clone(), rss_channel)
+      .await
+      .unwrap();
+
+    let FetchRssChannelsResponse(rss_channels) = fetch_rss_channels(&conductor, cell_id.clone(), agent_key.clone())
+      .await
+      .unwrap();
+
+    assert!(rss_channels.len() > 0);
 
     let shutdown = conductor.take_shutdown_handle().await.unwrap();
     conductor.shutdown().await;

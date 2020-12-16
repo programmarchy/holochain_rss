@@ -1,5 +1,5 @@
 [package]
-name = "holochain-rss-pub"
+name = "holochain_rss_pub"
 version = "0.0.1"
 authors = ["Donald Ness <donald@programmarchy.com>"]
 edition = "2018"

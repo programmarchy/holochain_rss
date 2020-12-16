@@ -159,7 +159,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "holochain-rss-pub"
+name = "holochain_rss_pub"
 version = "0.0.1"
 dependencies = [
  "derive_more",
