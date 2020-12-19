@@ -39,6 +39,7 @@ use holochain_types::{
   dna::{DnaFile, zome::Zome},
 };
 use holochain_zome_types::{
+  capability::CapSecret,
   zome::{FunctionName, ZomeName},
   zome_io::{ExternInput, ExternOutput},
   ZomeCallResponse,
@@ -234,67 +235,42 @@ async fn find_app(
     .await
 }
 
-async fn create_rss_channel(
+async fn call_zome<'a, I: 'a, O>(
   conductor: &ConductorHandle,
   cell_id: CellId,
   agent_key: AgentPubKey,
-  channel: RssChannel,
-) -> CallZomeResult<()> {
-  let data = match SerializedBytes::try_from(channel) {
+  zome_name: &str,
+  fn_name: &str,
+  cap: Option<CapSecret>,
+  payload: &'a I,
+) -> CallZomeResult<O>
+where
+  SerializedBytes: TryFrom<&'a I, Error = SerializedBytesError>,
+  O: TryFrom<SerializedBytes, Error = SerializedBytesError>,
+{
+  let data = match SerializedBytes::try_from(payload) {
     Ok(data) => Ok(data),
     Err(_) => Err(CallZomeError::SerializedBytes)
   };
 
   let zome_call = ZomeCall {
     cell_id: cell_id,
-    zome_name: String::from(RSS_ZOME_NAME).into(),
-    fn_name: FunctionName::from("create_rss_channel"),
+    zome_name: String::from(zome_name).into(),
+    fn_name: FunctionName::from(fn_name),
     payload: ExternInput::new(data?),
-    cap: None,
-    provenance: agent_key,
+    cap: cap,
+    provenance: agent_key
   };
 
-  let call_result = conductor
+  let result = conductor
     .clone()
     .call_zome(zome_call)
     .await?;
   
-  match call_result? {
-    ZomeCallResponse::Ok(_) => {
-      Ok(())
-    },
-    ZomeCallResponse::Unauthorized(c, z, f, a) => {
-      Err(CallZomeError::UnauthorizedZomeCall(c, z, f, a))
-    },
-    ZomeCallResponse::NetworkError(s) => {
-      Err(CallZomeError::ZomeCallNetworkError(s))
-    }
-  }
-}
-
-async fn fetch_rss_channels(
-  conductor: &ConductorHandle,
-  cell_id: CellId,
-  agent_key: AgentPubKey,
-) -> CallZomeResult<FetchRssChannelsResponse> {
-  let zome_call = ZomeCall {
-    cell_id: cell_id,
-    zome_name: String::from(RSS_ZOME_NAME).into(),
-    fn_name: FunctionName::from("fetch_rss_channels"),
-    payload: ExternInput::new(SerializedBytes::default()),
-    cap: None,
-    provenance: agent_key,
-  };
-
-  let call_result = conductor
-    .clone()
-    .call_zome(zome_call)
-    .await?;
-
-  match call_result? {
+  match result? {
     ZomeCallResponse::Ok(output) => {
       let serialized_bytes = output.into_inner();
-      match FetchRssChannelsResponse::try_from(serialized_bytes) {
+      match O::try_from(serialized_bytes) {
         Ok(response) => Ok(response),
         Err(_) => Err(CallZomeError::SerializedBytes)
       }
@@ -306,6 +282,39 @@ async fn fetch_rss_channels(
       Err(CallZomeError::ZomeCallNetworkError(s))
     }
   }
+}
+
+async fn create_rss_channel(
+  conductor: &ConductorHandle,
+  cell_id: CellId,
+  agent_key: AgentPubKey,
+  channel: RssChannel,
+) -> CallZomeResult<()> {
+  call_zome(
+    conductor,
+    cell_id,
+    agent_key,
+    RSS_ZOME_NAME,
+    "create_rss_channel",
+    None,
+    &channel
+  ).await
+}
+
+async fn fetch_rss_channels(
+  conductor: &ConductorHandle,
+  cell_id: CellId,
+  agent_key: AgentPubKey,
+) -> CallZomeResult<FetchRssChannelsResponse> {
+  call_zome(
+    conductor,
+    cell_id,
+    agent_key,
+    RSS_ZOME_NAME,
+    "fetch_rss_channels",
+    None,
+    &()
+  ).await
 }
 
 #[cfg(test)]
