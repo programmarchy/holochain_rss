@@ -45,6 +45,7 @@ use holochain_zome_types::{
   ZomeCallResponse,
 };
 use structopt::StructOpt;
+use uuid::Uuid;
 
 const RSS_APP_ID: &'static str = "holochain_rss-0.0.1";
 const RSS_DNA_BYTES: &'static [u8] = include_bytes!("../app/rss.dna.gz");
@@ -52,6 +53,7 @@ const RSS_ZOME_NAME: &'static str = "rss";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SerializedBytes)]
 pub struct RssChannel {
+  pub uuid: String,
   pub title: String,
   pub link: String,
   pub description: String,
@@ -161,23 +163,6 @@ async fn generate_agent_key(
     .expect("Failed to generate agent key.")
 }
 
-async fn install_and_activate_rss_app(
-  conductor: &ConductorHandle,
-  agent_key: AgentPubKey
-) -> ConductorResult<InstalledApp> {
-  let installed_app_id = InstalledAppId::from(RSS_APP_ID);
-  let cell_nick = CellNick::from("holochain_rss");
-  let dna_bytes = RSS_DNA_BYTES.into();
-  let dna = DnaFile::from_file_content(dna_bytes).await?;
-  let installed_app = install_app(&conductor, agent_key, installed_app_id.clone(), dna, cell_nick)
-    .await?;
-
-  activate_app(&conductor, installed_app_id)
-    .await?;
-
-  Ok(installed_app)
-}
-
 async fn install_app(
   conductor: &ConductorHandle,
   agent_key: AgentPubKey,
@@ -225,6 +210,23 @@ async fn activate_app(
     })
     .map(|error| Err(ConductorError::CreateAppFailed(error)))
     .unwrap_or(Ok(()))
+}
+
+async fn install_and_activate_rss_app(
+  conductor: &ConductorHandle,
+  agent_key: AgentPubKey
+) -> ConductorResult<InstalledApp> {
+  let installed_app_id = InstalledAppId::from(RSS_APP_ID);
+  let cell_nick = CellNick::from("holochain_rss");
+  let dna_bytes = RSS_DNA_BYTES.into();
+  let dna = DnaFile::from_file_content(dna_bytes).await?;
+  let installed_app = install_app(&conductor, agent_key, installed_app_id.clone(), dna, cell_nick)
+    .await?;
+
+  activate_app(&conductor, installed_app_id)
+    .await?;
+
+  Ok(installed_app)
 }
 
 async fn find_app(
@@ -283,12 +285,14 @@ where
     }
   }
 }
+#[derive(Debug, Clone, Serialize, Deserialize, SerializedBytes)]
+pub struct CreateRssChannelRequest(RssChannel);
 
 async fn create_rss_channel(
   conductor: &ConductorHandle,
   cell_id: CellId,
   agent_key: AgentPubKey,
-  channel: RssChannel,
+  request: CreateRssChannelRequest,
 ) -> CallZomeResult<()> {
   call_zome(
     conductor,
@@ -297,7 +301,7 @@ async fn create_rss_channel(
     RSS_ZOME_NAME,
     "create_rss_channel",
     None,
-    &channel
+    &request,
   ).await
 }
 
@@ -313,7 +317,7 @@ async fn fetch_rss_channels(
     RSS_ZOME_NAME,
     "fetch_rss_channels",
     None,
-    &()
+    &(),
   ).await
 }
 
@@ -342,21 +346,22 @@ mod tests {
     let cell = &installed_app.cell_data[0];
     let cell_id = cell.clone().into_id();
 
-    let rss_channel = RssChannel {
+    let channel = RssChannel {
+      uuid: Uuid::new_v4().to_string(),
       title: "My RSS Channel".to_string(),
       link: "https://holopod.host/my-rss-channel.xml".to_string(),
       description: "Welcome to the Holochain distributed RSS channel!".to_string(),
     };
 
-    let _ = create_rss_channel(&conductor, cell_id.clone(), agent_key.clone(), rss_channel)
+    let _ = create_rss_channel(&conductor, cell_id.clone(), agent_key.clone(), CreateRssChannelRequest(channel))
       .await
       .unwrap();
 
-    let FetchRssChannelsResponse(rss_channels) = fetch_rss_channels(&conductor, cell_id.clone(), agent_key.clone())
+    let FetchRssChannelsResponse(channels) = fetch_rss_channels(&conductor, cell_id.clone(), agent_key.clone())
       .await
       .unwrap();
 
-    assert!(rss_channels.len() > 0);
+    assert!(channels.len() > 0);
 
     let shutdown = conductor.take_shutdown_handle().await.unwrap();
     conductor.shutdown().await;

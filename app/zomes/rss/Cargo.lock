@@ -165,6 +165,7 @@ dependencies = [
  "derive_more",
  "hdk3",
  "serde",
+ "thiserror",
 ]
 
 [[package]]
