@@ -1252,6 +1252,7 @@ version = "0.0.1"
 dependencies = [
  "futures",
  "hdk3",
+ "holo_hash",
  "holochain",
  "holochain_keystore",
  "holochain_p2p",

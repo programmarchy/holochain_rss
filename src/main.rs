@@ -12,7 +12,14 @@ use std::{
   path::PathBuf,
   string::String,
 };
-use hdk3::prelude::{AgentPubKey, Deserialize, Serialize, SerializedBytes, SerializedBytesError, holochain_serial};
+use hdk3::prelude::{
+  AgentPubKey,
+  Deserialize,
+  Serialize,
+  SerializedBytes,
+  SerializedBytesError,
+  holochain_serial,
+};
 use holochain::{
   conductor::{
     Conductor,
@@ -27,7 +34,7 @@ use holochain::{
     DnaHash,
     ribosome::ZomeCallInvocation,
     workflow::ZomeCallResult,
-  }
+  },
 };
 use holochain_keystore::KeystoreSenderExt;
 use holochain_state::{
@@ -51,7 +58,12 @@ const RSS_APP_ID: &'static str = "holochain_rss-0.0.1";
 const RSS_DNA_BYTES: &'static [u8] = include_bytes!("../app/rss.dna.gz");
 const RSS_ZOME_NAME: &'static str = "rss";
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SerializedBytes)]
+#[derive(Debug, Clone, Serialize, Deserialize, SerializedBytes)]
+pub struct RssPublisher {
+  agent_key: AgentPubKey,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, SerializedBytes)]
 pub struct RssChannel {
   pub uuid: String,
   pub title: String,
@@ -59,8 +71,14 @@ pub struct RssChannel {
   pub description: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SerializedBytes)]
-pub struct FetchRssChannelsResponse(Vec<RssChannel>);
+#[derive(Debug, Clone, Serialize, Deserialize, SerializedBytes)]
+pub struct RssItem {
+  pub uuid: String,
+  pub title: Option<String>,
+  pub link: Option<String>,
+  pub description: Option<String>,
+  pub author: Option<String>,
+}
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "holochain_rss", about = "A Holochain RSS conductor.")]
@@ -285,6 +303,9 @@ where
     }
   }
 }
+
+// Create RSS Channel
+
 #[derive(Debug, Clone, Serialize, Deserialize, SerializedBytes)]
 pub struct CreateRssChannelRequest(RssChannel);
 
@@ -305,6 +326,33 @@ async fn create_rss_channel(
   ).await
 }
 
+// Create RSS Item
+
+#[derive(Debug, Clone, Serialize, Deserialize, SerializedBytes)]
+pub struct CreateRssItemRequest(RssItem, String);
+
+async fn create_rss_item(
+  conductor: &ConductorHandle,
+  cell_id: CellId,
+  agent_key: AgentPubKey,
+  request: CreateRssItemRequest,
+) -> CallZomeResult<()> {
+  call_zome(
+    conductor,
+    cell_id,
+    agent_key,
+    RSS_ZOME_NAME,
+    "create_rss_item",
+    None,
+    &request,
+  ).await
+}
+
+// Fetch RSS Channels
+
+#[derive(Debug, Clone, Serialize, Deserialize, SerializedBytes)]
+pub struct FetchRssChannelsResponse(Vec<RssChannel>);
+
 async fn fetch_rss_channels(
   conductor: &ConductorHandle,
   cell_id: CellId,
@@ -318,6 +366,31 @@ async fn fetch_rss_channels(
     "fetch_rss_channels",
     None,
     &(),
+  ).await
+}
+
+// Fetch RSS Items
+
+#[derive(Debug, Clone, Serialize, Deserialize, SerializedBytes)]
+pub struct FetchRssItemsRequest(String);
+
+#[derive(Debug, Clone, Serialize, Deserialize, SerializedBytes)]
+pub struct FetchRssItemsResponse(Vec<RssItem>);
+
+async fn fetch_rss_items(
+  conductor: &ConductorHandle,
+  cell_id: CellId,
+  agent_key: AgentPubKey,
+  request: FetchRssItemsRequest,
+) -> CallZomeResult<FetchRssItemsResponse> {
+  call_zome(
+    conductor,
+    cell_id,
+    agent_key,
+    RSS_ZOME_NAME,
+    "fetch_rss_items",
+    None,
+    &request,
   ).await
 }
 
@@ -353,7 +426,7 @@ mod tests {
       description: "Welcome to the Holochain distributed RSS channel!".to_string(),
     };
 
-    let _ = create_rss_channel(&conductor, cell_id.clone(), agent_key.clone(), CreateRssChannelRequest(channel))
+    let _ = create_rss_channel(&conductor, cell_id.clone(), agent_key.clone(), CreateRssChannelRequest(channel.clone()))
       .await
       .unwrap();
 
@@ -361,7 +434,41 @@ mod tests {
       .await
       .unwrap();
 
-    assert!(channels.len() > 0);
+    tracing::info!("channels: {:?}", channels.clone());
+
+    assert!(channels.len() == 1);
+
+    let item1 = RssItem {
+      uuid: Uuid::new_v4().to_string(),
+      title: Some("Item 1".to_string()),
+      link: None,
+      description: None,
+      author: None,
+    };
+
+    let _ = create_rss_item(&conductor, cell_id.clone(), agent_key.clone(), CreateRssItemRequest(item1, channel.uuid.clone()))
+      .await
+      .unwrap();
+
+    let item2 = RssItem {
+      uuid: Uuid::new_v4().to_string(),
+      title: Some("Item 2".to_string()),
+      link: None,
+      description: None,
+      author: None,
+    };
+
+    let _ = create_rss_item(&conductor, cell_id.clone(), agent_key.clone(), CreateRssItemRequest(item2, channel.uuid.clone()))
+      .await
+      .unwrap();
+
+    let FetchRssItemsResponse(items) = fetch_rss_items(&conductor, cell_id.clone(), agent_key.clone(), FetchRssItemsRequest(channel.uuid.clone()))
+      .await
+      .unwrap();
+
+    tracing::info!("items: {:?}", items.clone());
+
+    assert!(items.len() == 2);
 
     let shutdown = conductor.take_shutdown_handle().await.unwrap();
     conductor.shutdown().await;
