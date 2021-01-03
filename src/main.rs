@@ -53,6 +53,7 @@ use holochain_zome_types::{
 };
 use structopt::StructOpt;
 use uuid::Uuid;
+use warp::Filter;
 
 const RSS_APP_ID: &'static str = "holochain_rss-0.0.1";
 const RSS_DNA_BYTES: &'static [u8] = include_bytes!("../app/rss.dna.gz");
@@ -90,6 +91,18 @@ struct Opt {
     default_value = "./config.yml",
   )]
   config_path: PathBuf,
+
+  #[structopt(subcommand)]
+  cmd: Command,
+}
+#[derive(Debug, StructOpt)]
+enum Command {
+  Serve {
+    #[structopt(
+      help = "Port to listen on for HTTP server."
+    )]
+    port: i32
+  }
 }
 
 fn main() {
@@ -98,13 +111,15 @@ fn main() {
     .init();
 
   holochain::conductor::tokio_runtime()
-    .block_on(async_main())
+    .block_on(async_main());
 }
 
 async fn async_main() {
   human_panic::setup_panic!();
 
   let opt = Opt::from_args();
+
+  // Create conductor
 
   let conductor = conductor_handle_from_config_path(opt.config_path)
     .await;
@@ -129,6 +144,12 @@ async fn async_main() {
 
   tracing::info!("RSS channels: {:?}", rss_channels);
 
+  match opt.cmd {
+    Command::Serve { port } => {
+      serve(&conductor, port).await
+    }
+  };
+  
   conductor
     .take_shutdown_handle()
     .await
@@ -139,6 +160,15 @@ async fn async_main() {
       err
     })
     .expect("Failed to shut down holochain conductor.");
+}
+
+async fn serve(conductor: &ConductorHandle, port: u16) {
+  let hello = warp::path!("hello" / String)
+      .map(|name| format!("Hello, {}!", name));
+
+  warp::serve(hello)
+      .run(([127, 0, 0, 1], port))
+      .await;
 }
 
 async fn conductor_handle_from_config_path(
